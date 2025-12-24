@@ -399,12 +399,32 @@ func (c *Client) TagAsDeletedBatch2(ctx context.Context, keys []string) error {
 		return nil
 	}
 	debugf("batch deleting: keys=%v", keys)
-	luaFn := func(con redis.Scripter) error {
-		_, err := callLua(ctx, con, deleteBatchScript, keys, []interface{}{int64(c.Options.Delay / time.Second)})
-		return err
+	luaFn := func() error {
+		if len(keys) == 0 {
+			return nil
+		}
+		delay := int64(c.Options.Delay / time.Second)
+		pipe := c.rdb.Pipeline()
+		cmds := make([]*redis.Cmd, len(keys))
+		for i, key := range keys {
+			cmds[i] = deleteScript.Eval(ctx, pipe, []string{key}, delay)
+		}
+		_, err := pipe.Exec(ctx)
+		if err != nil && err != redis.Nil {
+			debugf("batch delete pipeline exec failed: %v", err)
+		}
+		for _, cmd := range cmds {
+			if err := cmd.Err(); err != nil {
+				if err == redis.Nil {
+					continue
+				}
+				return err
+			}
+		}
+		return nil
 	}
 	if c.Options.WaitReplicas > 0 {
-		err := luaFn(c.rdb)
+		err := luaFn()
 		cmd := redis.NewCmd(ctx, "WAIT", c.Options.WaitReplicas, c.Options.WaitReplicasTimeout)
 		if err == nil {
 			err = c.rdb.Process(ctx, cmd)
@@ -418,5 +438,5 @@ func (c *Client) TagAsDeletedBatch2(ctx context.Context, keys []string) error {
 		}
 		return err
 	}
-	return luaFn(c.rdb)
+	return luaFn()
 }

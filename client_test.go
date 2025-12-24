@@ -12,18 +12,12 @@ import (
 
 var rdbKey = "client-test-key"
 
-var rdb = redis.NewClient(&redis.Options{
-	Addr:     "localhost:6379",
-	Username: "root",
+var rdb = redis.NewClusterClient(&redis.ClusterOptions{
+	Addrs:    []string{"127.0.0.1:7000", "127.0.0.1:7001", "127.0.0.1:7002"},
+	Username: "",
 	Password: "",
 })
 var ctx = context.Background()
-
-// var rdb = redis.NewClusterClient(&redis.ClusterOptions{
-// 	Addrs:    []string{"43.128.5.63:46381", "43.128.5.63:46382", "43.128.5.63:46380", "43.128.5.63:46383", "43.128.5.63:46384", "43.128.5.63:46385"},
-// 	Username: "",
-// 	Password: "",
-// })
 
 type iRedisCluster interface {
 	ForEachMaster(context.Context, func(context.Context, *redis.Client) error) error

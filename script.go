@@ -45,11 +45,4 @@ if lo == ARGV[1] then
 	redis.call('HDEL', KEYS[1], 'lockOwner')
 	redis.call('EXPIRE', KEYS[1], ARGV[2])
 end`)
-
-	deleteBatchScript = redis.NewScript(`
-for i, key in ipairs(KEYS) do
-	redis.call('HSET', key, 'lockUntil', 0)
-	redis.call('HDEL', key, 'lockOwner')
-	redis.call('EXPIRE', key, ARGV[1])
-end`)
 )

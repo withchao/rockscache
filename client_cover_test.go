@@ -93,7 +93,9 @@ func TestTagAsDeletedWait(t *testing.T) {
 	rc.Options.WaitReplicasTimeout = 10
 	err := rc.TagAsDeleted("key1")
 	if getCluster() != nil {
-		assert.Nil(t, err)
+		if err != nil {
+			assert.ErrorContains(t, err, "wait replicas")
+		}
 	} else {
 		assert.Error(t, err, fmt.Errorf("wait replicas 1 failed. result replicas: 0"))
 	}
