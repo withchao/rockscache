@@ -19,25 +19,60 @@ var (
 )
 
 func (c *Client) luaGetBatch(ctx context.Context, keys []string, owner string) ([]interface{}, error) {
-	res, err := callLua(ctx, c.rdb, getBatchScript, keys, []interface{}{now(), now() + int64(c.Options.LockExpire/time.Second), owner})
-	debugf("luaGetBatch return: %v, %v", res, err)
-	if err != nil {
-		return nil, err
+	if len(keys) == 0 {
+		return []interface{}{}, nil
 	}
-	return res.([]interface{}), nil
+	cur := now()
+	lockUntil := cur + int64(c.Options.LockExpire/time.Second)
+	args := []interface{}{cur, lockUntil, owner}
+
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.Cmd, len(keys))
+	for i, key := range keys {
+		cmds[i] = getScript.Eval(ctx, pipe, []string{key}, args...)
+	}
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		debugf("luaGetBatch pipeline exec failed: %v", err)
+	}
+
+	res := make([]interface{}, len(keys))
+	for i, cmd := range cmds {
+		v, err := cmd.Result()
+		if err == redis.Nil {
+			err = nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		res[i] = v
+	}
+	debugf("luaGetBatch return: %v", res)
+	return res, nil
 }
 
 func (c *Client) luaSetBatch(ctx context.Context, keys []string, values []string, expires []int, owner string) error {
-	var vals = make([]interface{}, 0, 2+len(values))
-	vals = append(vals, owner)
-	for _, v := range values {
-		vals = append(vals, v)
+	if len(keys) == 0 {
+		return nil
 	}
-	for _, ex := range expires {
-		vals = append(vals, ex)
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.Cmd, len(keys))
+	for i, key := range keys {
+		cmds[i] = setScript.Eval(ctx, pipe, []string{key}, values[i], owner, expires[i])
 	}
-	_, err := callLua(ctx, c.rdb, setBatchScript, keys, vals)
-	return err
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		debugf("luaSetBatch pipeline exec failed: %v", err)
+	}
+	for _, cmd := range cmds {
+		if err := cmd.Err(); err != nil {
+			if err == redis.Nil {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) fetchBatch(ctx context.Context, keys []string, idxs []int, expire time.Duration, owner string, fn func(idxs []int) (map[int]string, error)) (map[int]string, error) {
